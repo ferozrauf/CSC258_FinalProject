@@ -4,9 +4,13 @@
  *	Using MPI, openMP, mergeSort,hdfs to read files, and Simd vector operations
  *
  */
+
+
+
 #include <stdio.h>
-#include <stdlib.h>
 #include <mpi.h>
+#include <omp.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <sys/time.h>
@@ -19,8 +23,8 @@
 
 int proc_id;
 int num_procs;
-struct timeval start, end, total;
-long t;
+struct timeval start, end;
+long total;
 long gig_value = 250000000;
 long num_elements;
 int num_buckets;
@@ -30,11 +34,13 @@ int **storage;
 
 void parseArgs(int argc, char ** argv)
 {
+	char c;
+	int num_gigs;
     while ((c = getopt (argc, argv, "n:")) != -1)
         switch (c)
         {
             case 'n':
-                num_gigs = atol(optarg);
+                num_gigs = atoi(optarg);
                 break;
             default:
                 printf("Error: malformed arguments!\n");
@@ -66,7 +72,7 @@ int getProc(int num)
 	int arr[4] = {3,6,10,17};
 	for(i = 0; i < 4; i++)
 	{
-		if(num <= MAX_INT* (arr[i]/17))
+		if(num <= INT_MAX* (arr[i]/17))
 			return i+1;
 	}
 	return 4;
@@ -76,7 +82,7 @@ void sendNumbers()
 	int i,j,k;
 	int load_balance[4] = {3,6,10,17};
 	srand(time(NULL));
-	int bucket_threshold = MAX_INT/num_buckets;
+	int bucket_threshold = INT_MAX/num_buckets;
 	int ** arr;
 	int *loc;
 	loc = (int*)malloc(sizeof(int)*4);
@@ -122,7 +128,7 @@ void receiveNumbers(int proc_id)
 }
 int partition( int* arr, int l, int r) {
    int pivot, i, j, t;
-   pivot = a[l];
+   pivot = arr[l];
    i = l; j = r+1;
 		
    while( 1)
@@ -168,17 +174,16 @@ void sortNumbers(int proc_id)
 
 int main(int argc, char **argv)
 {  
-    
+    long t;
     parseArgs(argc, argv);
-    
-    /*MPI_Init(NULL, NULL);
+    MPI_Init(NULL, NULL);
     MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
     MPI_Comm_rank(MPI_COMM_WORLD, &proc_id);
     
     int resultlen;
     char pname[MPI_MAX_PROCESSOR_NAME];
-    MPI_Get_processor_name(pname, &resultlen);*/
-    printf("CSUG Computer %s, with proc_id %d\n", "SELF", 0);
+    MPI_Get_processor_name(pname, &resultlen);
+    printf("CSUG Computer %s, with proc_id %d\n", pname, proc_id);
 
     allocate(proc_id);
     //MPI_Barrier(MPI_COMM_WORLD);
@@ -189,13 +194,13 @@ int main(int argc, char **argv)
         sendNumbers();
     } else {
     	receiveNumbers(proc_id);
-    	sortNumbers();
+    	sortNumbers(proc_id);
     }
     //MPI_Barrier(MPI_COMM_WORLD);
     if (proc_id == 0) {
     	gettimeofday(&end, NULL);
-        t = (end.tv_sec - start->tv_sec) * 1000000;
-    	t += end.tv_usec - start->tv_usec;
+        t = (end.tv_sec - start.tv_sec) * 1000000;
+    	t += end.tv_usec - start.tv_usec;
     	total = ((double) t) / 1000000.0;
     	printf("Completed time: %lf seconds\n",total);
     }
