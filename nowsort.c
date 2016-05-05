@@ -18,20 +18,21 @@
 #include <limits.h>
 
 
-#define BUCKET_SIZE 32000
+#define BUCKET_SIZE 64000
 
 
 int proc_id;
 int num_procs;
-struct timeval start, end;
+clock_t begin, end;
 long total;
 long gig_value = 250000000;
 long num_elements;
 int num_buckets;
-int ***storage;
+int **storage;
 int **buckets;
 int last_bucket_length;
-
+int *bucket_length;
+int *load_balance;
 void parseArgs(int argc, char ** argv)
 {
 	char c;
@@ -54,86 +55,99 @@ void allocate(int proc_id)
 	int arr[4] = {3,3,4,10};
 	int i,j,k;
 	num_buckets = num_elements/BUCKET_SIZE + 1;
+	printf("Number of elements %d in bucket size %d, so num_buckets is %d \n",num_elements,BUCKET_SIZE,num_buckets);
+	load_balance = malloc(sizeof(int)*4);
+	for(i = 0; i< 4 ;i++)
+		load_balance[i] = i==0 ? arr[0] : load_balance[i-1] + arr[i];
 	//load balancing number of buckets across the number of cores 24 cycle 1, 24 cycle 2, 32 cycle 3, and 56 node2x14a
 	//keeping number of buckets dynamic, but starting at half as many buckets for entire project
-	if(proc_id==0)
-	{
-		storage = (int*)malloc(sizeof(int)*4);
-		for(i = 0; i<4;i++)
-		{
-			int proc_buckets = num_buckets*(arr[i]/17);
-			storage[i] = (int*)malloc(sizeof(int)*proc_buckets);
-			for(j = 0;j<proc_buckets;i++)
-			{
-				storage[i][j] = (int*)calloc(BUCKET_SIZE,sizeof(int));
-			}
-		}
+	storage = (int*)malloc(sizeof(int*)*num_buckets);
+	for(i = 0; i< num_buckets; i++)
+		storage[i] = (int*)malloc(sizeof(int)*BUCKET_SIZE);
+	/*int alloc = num_buckets * arr[proc_id];
+	alloc /= 17;
+	alloc += 1;*/
+	bucket_length = (int*)calloc(num_buckets,sizeof(int));
+	for(i = 0;i < 4;i++)
+	{	
+		int temp = num_buckets/17;
+		temp += 1;
+		load_balance[i] *= temp;
 	}
-	num_buckets /= 2;
-	//alocate buckets for each processor
-	buckets = (int*)malloc(sizeof(int)*(num_buckets));
-	//allocate memory for each bucket
-	for(i = 0;i < num_buckets;i++)
-		buckets[i] = (int*)calloc(BUCKET_SIZE,sizeof(int));
+	load_balance[3] = num_buckets;
 }
-int getProc(int num)
+
+int getProc(int bucket_num)
 {
-	int i;
-	int arr[4] = {3,6,10,17};
-	for(i = 0; i < 4; i++)
+	//int load_balance[4] = {3,6,10,17};
+	int j;
+	for(j = 0; j < 4; j++)
 	{
-		if(num <= INT_MAX* (arr[i]/17))
-			return i;
+		if(bucket_num<load_balance[j])
+			return j;
 	}
 	return 4;
 }
+int getBucket(int num,int num_buckets,int *bucket_size)
+{
+	int i = INT_MAX/num_buckets;
+	i = num/i;
+	i = i % num_buckets;
+	//printf("Initial bucket placement %d \n",i);
+	while(bucket_size[i]==BUCKET_SIZE && i<num_buckets) 
+	{
+		i++;
+		i = i % num_buckets;
+	}
+	//printf("Final bucket placement %d \n",i);
+
+	return i;
+}
 void sendNumbers()
 {
-	int i,j,k;
-	int load_balance[4] = {3,6,10,17};
+	int i,j,k,l;
+	//int load_balance[4] = {3,6,10,17};
+	//int bucket_threshold = INT_MAX/num_buckets;
 	srand(time(NULL));
-	int bucket_threshold = INT_MAX/num_buckets;
-	//int **arr = (int*)malloc(sizeof(int)*4);
-	int *loc = (int*)calloc(4,sizeof(int));
-	int *buckets_per = (int*)calloc(4,sizeof(int));
+	printf("Doing bucket sort on random numbers, num_buckets %d \n",num_buckets);
+
 	for(i = 0;i< num_elements;i++)
 	{
-		int j = rand();
-		int proc = getProc(j);
-		storage[proc][buckets_per[proc]][loc[proc]++] = j;
-		if(loc[proc]==BUCKET_SIZE)
-		{
-			loc[proc] = 0;
-			buckets_per[proc]++;
-		}
+		int temp = rand();
+		j = getBucket(temp,num_buckets,bucket_length);
+		//printf("Adding the %dith number: %d ,into bucket %d of length %d\n",i,temp,j,bucket_length[j]);
+		storage[j][bucket_length[j]] = temp;
+		bucket_length[j]++;
 	}
-	buckets = storage[0];
-	num_buckets = buckets_per[0];
-	last_bucket_length = loc[0];
+	printf("Buckets allocated, num_buckets %d \n",num_buckets);
 	MPI_Barrier(MPI_COMM_WORLD);
-	for(i = 1; i < 4; i++)
+	MPI_Bcast(bucket_length,num_buckets,MPI_INT,0,MPI_COMM_WORLD);
+	printf("PROC_ID %d has it's buckets\n",0);
+	//MPI_Bcast(load_balance,4,MPI_INT,0,MPI_COMM_WORLD);
+	for(i = load_balance[0]; i< num_buckets; i++)
 	{
-		MPI_Send(&(buckets_per[i]),1,MPI_INT,i,0,MPI_COMM_WORLD);
-		MPI_Send(&(loc[i]),1,MPI_INT,i,0,MPI_COMM_WORLD);
+		MPI_Send(storage[i],bucket_length[i],MPI_INT,getProc(i),i,MPI_COMM_WORLD);
 	}
-	for(i = 1; i < 4; i++)
-	{
-		for(j = 0; j < buckets_per[i]; j++)
-			MPI_Send(&(storage[i][j]),BUCKET_SIZE,MPI_INT,i,j,MPI_COMM_WORLD);
-		MPI_Send(&(storage[i][buckets_per[i]]),loc[i],MPI_INT,i,buckets_per[i],MPI_COMM_WORLD);
-	}
+	printf("Buckets sent, sent %d of them \n",num_buckets);
 }
 
 void receiveNumbers(int proc_id)
 {
 	int i,j;
 	MPI_Status status;
+	printf("PROC_ID %d is waiting on process 0 \n",proc_id);
 	MPI_Barrier(MPI_COMM_WORLD);
-	MPI_Recv(num_buckets,1,MPI_INT,0,0,MPI_COMM_WORLD,&status);
-	MPI_Recv(last_bucket_length,1,MPI_INT,0,0,MPI_COMM_WORLD,&status);
-	for(i = 0; i < num_buckets ; i++)
-		MPI_Recv(buckets[i],BUCKET_SIZE,MPI_INT,0,i,MPI_COMM_WORLD,&status);
-	MPI_Recv(buckets[num_buckets],last_bucket_length,MPI_INT,0,num_buckets,MPI_COMM_WORLD,&status);
+	MPI_Bcast(bucket_length,num_buckets,MPI_INT,0,MPI_COMM_WORLD);
+	printf("ID: %d received bucket lengths \n",proc_id);
+	//buckets = malloc(sizeof(int*)*load_balance[proc_id]);
+	printf("ID: %d getting buckets from %d to %d \n",proc_id,load_balance[proc_id-1],load_balance[proc_id]);
+
+	for(i = load_balance[proc_id-1]; i < num_buckets && i < load_balance[proc_id] ; i++)
+	{
+		MPI_Recv(storage[i],bucket_length[i],MPI_INT,0,i,MPI_COMM_WORLD,&status);
+
+	}
+
 }
 int partition( int* arr, int l, int r) {
    int pivot, i, j, t;
@@ -174,7 +188,7 @@ void heapsort(int* arr, unsigned int N)
         } else {
             n--;              
             if (n == 0) {
-                return; /
+                return; 
             }
             t = arr[n];        
             arr[n] = arr[0];  
@@ -199,38 +213,38 @@ void heapsort(int* arr, unsigned int N)
 
 void sort(int * arr,int length)
 {
-	if(length<=BUCKET_SIZE)
-		heapsort(arr,length);
-	else
-		quickSort(arr,0,length);
+	quickSort(arr,0,length);
 }
 void sortNumbers(int proc_id)
 {
-	int i,j;
-	int load_balance[4] = {3,6,10,17};
+	int i,j,k,start,end;
+	start = proc_id==0 ? 0 : load_balance[proc_id-1];
+	end = load_balance[proc_id];
 	int threads[4] = {24,24,32,56};
-	int num_buckets = (num_elements/BUCKET_SIZE) * (load_balance[proc_id-1]/17);
 	omp_set_num_threads(threads[proc_id]);
 	#pragma omp parallel for
-	for (i = 0; i < num_buckets - 1; i++)
-		sort(buckets[i],BUCKET_SIZE);
-	sort(buckets[num_buckets],last_bucket_length);
-	int length = (BUCKET_SIZE*num_buckets-1)+last_bucket_length;
+	for(i = start;i < end; i++)
+		sort(storage[i],bucket_length[i]);
+	printf("Process %d has finished sorting buckets\n",proc_id);
+	/*int length = 0;
+	for(i = start; i< end;i++)
+		length += bucket_length[i];
 	int* arr = malloc(sizeof(int)*length);
-
-	#pragma omp parallel for
-	for(i = 0;i < num_buckets ; i++)
-		for(j = 0; j < BUCKET_SIZE; j++)
-			arr[i*BUCKET_SIZE + j] = buckets[i][j];
-	#pragma omp parallel for
-	for(i = 0;i < last_bucket_length; i++)
-		arr[(num_buckets-1)*BUCKET_SIZE + i] = buckets[num_buckets][i];
-	sort(arr,length);	
+	
+	k = 0;
+	for(i = 0;i < end ; i++)
+	{
+		for(j = 0; j < bucket_length[i];j++)
+			arr[k + j] = buckets[i][j];
+		k+=bucket_length[i];
+	}
+	sort(arr,length);*/
 }
 
 int main(int argc, char **argv)
 {  
-    long t;
+	struct timeval  tv1, tv2;
+
     parseArgs(argc, argv);
     MPI_Init(NULL, NULL);
     MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
@@ -243,21 +257,23 @@ int main(int argc, char **argv)
 
     allocate(proc_id);
     MPI_Barrier(MPI_COMM_WORLD);
+    printf("Memory allocation for %s, process_id %d is completed\n",pname,proc_id);
     // Wait for all machines to finish allocating memory
     if (proc_id == 0) {
-        gettimeofday(&start, NULL);
+		gettimeofday(&tv1, NULL);
         sendNumbers();
     } else {
     	receiveNumbers(proc_id);
     }
+    printf("CSUG computer %s proc_id %d is starting sorting \n",pname,proc_id);
     sortNumbers(proc_id);
     MPI_Barrier(MPI_COMM_WORLD);
     if (proc_id == 0) {
-    	gettimeofday(&end, NULL);
-        t = (end.tv_sec - start.tv_sec) * 1000000;
-    	t += end.tv_usec - start.tv_usec;
-    	total = ((double) t) / 1000000.0;
-    	printf("Completed time: %lf seconds\n",total);
+    	gettimeofday(&tv2, NULL);
+
+		printf ("Total time = %f seconds\n",
+         (double) (tv2.tv_usec - tv1.tv_usec) / 1000000 +
+         (double) (tv2.tv_sec - tv1.tv_sec));
     }
     
     MPI_Finalize();
