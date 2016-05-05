@@ -124,6 +124,8 @@ void sendNumbers()
 	MPI_Bcast(bucket_length,num_buckets,MPI_INT,0,MPI_COMM_WORLD);
 	printf("PROC_ID %d has it's buckets\n",0);
 	//MPI_Bcast(load_balance,4,MPI_INT,0,MPI_COMM_WORLD);
+	omp_set_num_threads(3);
+	#pragma omp parallel for
 	for(i = load_balance[0]; i< num_buckets; i++)
 	{
 		MPI_Send(storage[i],bucket_length[i],MPI_INT,getProc(i),i,MPI_COMM_WORLD);
