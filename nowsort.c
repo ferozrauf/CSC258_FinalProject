@@ -129,11 +129,11 @@ void receiveNumbers(int proc_id)
 	int i,j;
 	MPI_Status status;
 	MPI_Barrier(MPI_COMM_WORLD);
-	MPI_Recv(num_buckets,1,MPI_INT,0,MPI_COMM_WORLD,&status);
-	MPI_Recv(last_bucket_length,1,MPI_INT,MPI_COMM_WORLD,&status);
+	MPI_Recv(num_buckets,1,MPI_INT,0,0,MPI_COMM_WORLD,&status);
+	MPI_Recv(last_bucket_length,1,MPI_INT,0,0,MPI_COMM_WORLD,&status);
 	for(i = 0; i < num_buckets ; i++)
-		MPI_Recv(buckets[i],BUCKET_SIZE,MPI_INT,0,MPI_COMM_WORLD,&status);
-	MPI_Recv(buckets[num_buckets],BUCKET_SIZE,MPI_INT,0,MPI_COMM_WORLD,&status);
+		MPI_Recv(buckets[i],BUCKET_SIZE,MPI_INT,0,i,MPI_COMM_WORLD,&status);
+	MPI_Recv(buckets[num_buckets],last_bucket_length,MPI_INT,0,num_buckets,MPI_COMM_WORLD,&status);
 }
 int partition( int* arr, int l, int r) {
    int pivot, i, j, t;
