@@ -124,7 +124,7 @@ void sendNumbers()
 	MPI_Bcast(bucket_length,num_buckets,MPI_INT,0,MPI_COMM_WORLD);
 	printf("PROC_ID %d has it's buckets\n",0);
 	//MPI_Bcast(load_balance,4,MPI_INT,0,MPI_COMM_WORLD);
-	omp_set_num_threads(3);
+	omp_set_num_threads(24);
 	#pragma omp parallel for
 	for(i = load_balance[0]; i< num_buckets; i++)
 	{
@@ -143,8 +143,12 @@ void receiveNumbers(int proc_id)
 	printf("ID: %d received bucket lengths \n",proc_id);
 	//buckets = malloc(sizeof(int*)*load_balance[proc_id]);
 	printf("ID: %d getting buckets from %d to %d \n",proc_id,load_balance[proc_id-1],load_balance[proc_id]);
-
-	for(i = load_balance[proc_id-1]; i < num_buckets && i < load_balance[proc_id] ; i++)
+	int threads = proc_id==1 ? 24 : 32;
+	threads = proc_id>2 ? threads : 56;
+	omp_set_num_threads(threads);
+	
+	#pragma omp parallel for
+	for(i = load_balance[proc_id-1];i < load_balance[proc_id]; i++)
 	{
 		MPI_Recv(storage[i],bucket_length[i],MPI_INT,0,i,MPI_COMM_WORLD,&status);
 
